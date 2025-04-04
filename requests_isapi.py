@@ -3,15 +3,17 @@ import requests
 from requests.auth import HTTPDigestAuth
 from xml.dom.minidom import parseString
 import xml.etree.ElementTree as ET
+import time
 
 """
-Sobre os Parâmetros  
+Sobre os parâmetros  em geral
 - Se o valor fornecido for maior que o máximo permitido, será definido como o valor máximo.  
 - Se o valor fornecido for menor que o mínimo permitido, será definido como 0.  
 - Se um valor inválido for enviado (letras ou formato incorreto), a resposta retornará badreq.  
 - Se uma tag vazia for enviada, as configurações atuais serão mantidas.  
 - Não é necessário enviar todas as tags internas. Exemplo: ao enviar apenas `<brightnessLevel>0</brightnessLevel>`, 
-as demais configurações permanecerão inalteradas.  
+as demais configurações permanecerão inalteradas. 
+- Tanto as tags quanto os payload são casesensitive
 """
 
 def verificar_camera_conectada(camera_ip, username, password):
@@ -47,13 +49,95 @@ def salvar_xml_conteudo(conteudo_xml, nome_arquivo):
         file.write(xml_pretty_str)
     print(f"Conteúdo XML salvo com sucesso em '{nome_arquivo}' com indentação reduzida.")
 
-def get_parametros_imagem(camera_ip, username, password, output_file="get_image_parameters_1027_defaul_conf.xml"):
+def salvar_imagem(camera_ip, username, password):
+    url = f"http://{camera_ip}/ISAPI/Streaming/channels/1/picture"
+    filename = f"{camera_ip}_imagem.jpg"
+    try:
+        response = requests.get(url, auth=HTTPDigestAuth(username, password), stream=True)
+        if response.status_code == 200:
+            with open(filename, "wb") as file:
+                file.write(response.content)
+            print(f"Captura de imagem para {camera_ip} validada. Imagem salva como {filename}")
+        else:
+            print(f"Captura de imagem falhou para {camera_ip}. Código de status: {response.status_code}")
+    except requests.RequestException as e:
+        print(f"Captura de imagem falhou para {camera_ip}. Erro de conexão: {e}")
+
+def fps_captura_imagem(camera_ip, username, password, n=500):
+  url = f"http://{camera_ip}/ISAPI/Streaming/channels/1/picture"
+  tempos = []
+
+  for i in range(n):
+    OUTPUT_FILE = f"{camera_ip}_{i}_snapshot.jpg"
+    start_time = time.perf_counter()
+    
+    try:
+      response = requests.get(url, auth=HTTPDigestAuth(username, password), stream=True)
+      tempos.append(time.perf_counter() - start_time)
+      if response.status_code == 200:
+        with open(OUTPUT_FILE, "wb") as file:
+          file.write(response.content)
+          print("Tudo certo!")
+              
+    except requests.RequestException:
+      print("Deu merda")
+
+  if tempos:
+    fps_min = 1 / max(tempos)
+    fps_max = 1 / min(tempos)
+    fps_medio = 1 / (sum(tempos) / len(tempos))
+
+    print(f"{fps_min:.4f} {fps_max:.4f} {fps_medio:.4f}")
+
+def get_parametros_imagem(camera_ip, username, password, output_file="get_image_parameters_7a46_defaul_conf.xml"):
+    """ 
+    Exemplo resposta, não tem as opções de input
+    <ImageChannel>
+        <id>1</id>
+        <enabled>true</enabled>
+        <videoInputID>1</videoInputID>
+        <ImageFlip xmlns="http://www.hikvision.com/ver20/XMLSchema" version="2.0">
+            <enabled>false</enabled>
+        </ImageFlip>
+        <WDR xmlns="http://www.hikvision.com/ver20/XMLSchema" version="2.0">
+            <enabled>false</enabled>
+            <WDRLevel>67</WDRLevel>
+        </WDR> ... brilho, contraste, todas as configs de display
+    """
     # Primeiro, verifica se a câmera está conectada
     if not verificar_camera_conectada(camera_ip, username, password):
         return
     
-    #url = f'http://{camera_ip}/ISAPI/Image/channels' /ISAPI/Image/channels
     url = f'http://{camera_ip}/ISAPI/Image/channels'
+    
+    try:
+        # Envia a requisição GET com autenticação Digest
+        response = requests.get(url, auth=HTTPDigestAuth(username, password), timeout=5)
+
+        # Verifica se a requisição foi bem-sucedida
+        if response.status_code == 200:
+            # Salva o conteúdo XML usando a função salvar_xml_conteudo
+            print(response.text)
+            salvar_xml_conteudo(response.content, output_file)
+        else:
+            print(f"Falha ao obter parâmetros de imagem. Código de status: {response.status_code}")
+            print("Conteúdo da resposta:", response.text)
+
+    except requests.exceptions.Timeout:
+        print(f"Erro: Tempo limite excedido ao tentar conectar à câmera {camera_ip}.")
+    except requests.exceptions.RequestException as e:
+        print(f"Erro de conexão com a câmera {camera_ip}: {e}")
+
+def get_system_capacities(camera_ip, username, password, output_file="get_system_capacities_4A24_defaul_conf.xml"):
+    """ 
+    Exemplo resposta
+    <DeviceCap>
+        <isSupportROI>true</isSupportROI>
+        <isSupportX>true</isSupportX>
+    </DeviceCap>
+    """
+   
+    url = f'http://{camera_ip}/ISAPI/System/capabilities'
     
     try:
         # Envia a requisição GET com autenticação Digest
@@ -65,6 +149,41 @@ def get_parametros_imagem(camera_ip, username, password, output_file="get_image_
             salvar_xml_conteudo(response.content, output_file)
         else:
             print(f"Falha ao obter parâmetros de imagem. Código de status: {response.status_code}")
+            print("Conteúdo da resposta:", response.text)
+
+    except requests.exceptions.Timeout:
+        print(f"Erro: Tempo limite excedido ao tentar conectar à câmera {camera_ip}.")
+    except requests.exceptions.RequestException as e:
+        print(f"Erro de conexão com a câmera {camera_ip}: {e}")
+
+def get_device_status_capacities(camera_ip, username, password, output_file="get_system_status_7a46_defaul_conf.xml"):
+    """
+    Exemplo resposta
+    <DeviceStatus>
+        <currentDeviceTime>2011-01-01T22:35:52-03:00</currentDeviceTime>
+        <deviceUpTime>81387</deviceUpTime>
+        <CPUList>
+        ...
+        </CPUList>
+        <MemoryList>
+        ...
+        </MemoryList>
+    </DeviceStatus>
+    """
+   
+    url = f'http://{camera_ip}/ISAPI/System/status'
+    
+    try:
+        # Envia a requisição GET com autenticação Digest
+        response = requests.get(url, auth=HTTPDigestAuth(username, password), timeout=5)
+
+        # Verifica se a requisição foi bem-sucedida
+        if response.status_code == 200:
+            # Salva o conteúdo XML usando a função salvar_xml_conteudo
+            print(response.text)
+            salvar_xml_conteudo(response.content, output_file)
+        else:
+            print(f"Falha ao obter parâmetros de status. Código de status: {response.status_code}")
             print("Conteúdo da resposta:", response.text)
 
     except requests.exceptions.Timeout:
@@ -388,27 +507,213 @@ def set_ircut(camera_ip, username, password, channel_id=1, ircut_filter_type="da
         print(f"Erro de conexão com a câmera {camera_ip}: {e}")
         return -1
 
-camera_ip = ""
-username = ""
-password = ""
+def get_image_capabilities(camera_ip, username, password, output_file="get_image_capabilities.xml", ca_cert_path="/etc/ssl/certs/hikvision_2048_cert.pem"):
+    url = f'https://{camera_ip}/ISAPI/Image/channels/1/capabilities'  # Note o https
 
-#get_exposure_mode(camera_ip, username, password, channel_id=1, parameter_type="exposureMode")
-#get_shutter_options(camera_ip, username, password, channel_id=1)
+    # Se não passar o caminho do certificado, usará o padrão do sistema
+    verify_ssl = ca_cert_path if ca_cert_path else True
+
+    try:
+        response = requests.get(url, auth=HTTPDigestAuth(username, password), timeout=5, verify=false)
+
+        if response.status_code == 200:
+            salvar_xml_conteudo(response.content, output_file)
+            print(f"Capabilities salvas em {output_file}")
+        else:
+            print(f"Falha ao obter capabilities. Status: {response.status_code}")
+            print(response.text)
+    except requests.exceptions.SSLError as ssl_err:
+        print(f"Erro de SSL: {ssl_err}")
+    except requests.exceptions.Timeout:
+        print(f"Timeout ao conectar com {camera_ip}")
+    except requests.exceptions.RequestException as e:
+        print(f"Erro de conexão: {e}")
+
+def set_distorcao_lente(camera_ip, username, password, enabled=True):
+    """
+    Envia requisição PUT para habilitar ou desabilitar correção de distorção de lente.
+    """
+    url = f'http://{camera_ip}/ISAPI/Image/channels/1/lensDistortionCorrection'
+    headers = {'Content-Type': 'application/xml'}
+
+    payload = f"""
+    <LensDistortionCorrection>
+        <enabled>{"true" if enabled else "false"}</enabled>
+    </LensDistortionCorrection>
+    """.strip()
+
+    try:
+        response = requests.put(url, data=payload, headers=headers, auth=HTTPDigestAuth(username, password), timeout=5)
+
+        if response.status_code == 200:
+            print(f"Distorção de lente {'habilitada' if enabled else 'desabilitada'} com sucesso!")
+            return 0
+        else:
+            print(f"Falha ao ajustar distorção de lente. Código de status: {response.status_code}")
+            print(f"Resposta: {response.text}")
+
+    except requests.exceptions.Timeout:
+        print(f"Erro: Tempo limite excedido ao tentar conectar à câmera {camera_ip}.")
+    except requests.exceptions.RequestException as e:
+        print(f"Erro de conexão com a câmera {camera_ip}: {e}")
+    return -1
+
+def set_eis(camera_ip, username, password, enabled=True):
+    """
+    Ativa ou desativa a estabilização eletrônica de imagem (EIS) na câmera Hikvision.
+    """
+    url = f'http://{camera_ip}/ISAPI/Image/channels/1/EIS'
+    headers = {'Content-Type': 'application/xml'}
+
+    payload = f"""
+    <EIS>
+        <enabled>{"true" if enabled else "false"}</enabled>
+    </EIS>
+    """.strip()
+
+    try:
+        response = requests.put(url, data=payload, headers=headers, auth=HTTPDigestAuth(username, password), timeout=5)
+
+        if response.status_code == 200:
+            print(f"EIS {'ativado' if enabled else 'desativado'} com sucesso!")
+        else:
+            print(f"Falha ao configurar EIS. Código de status: {response.status_code}")
+            print("Resposta:", response.text)
+
+    except requests.exceptions.Timeout:
+        print(f"Erro: Tempo limite excedido ao tentar conectar à câmera {camera_ip}.")
+    except requests.exceptions.RequestException as e:
+        print(f"Erro de conexão com a câmera {camera_ip}: {e}")
+
+def set_exposure_by_modes(camera_ip, username, password, modo, iris_level=None):
+    """
+    Ajusta a exposição da câmera Hikvision via ISAPI, com 3 modos definidos:
+    - "manual"
+    - "p-iris-auto"
+    - "p-iris-manual" (com iris_level opcional, padrão 40)
+    """
+
+    url = f'http://{camera_ip}/ISAPI/Image/channels/1/exposure'
+    headers = {'Content-Type': 'application/xml'}
+
+    # Valida o modo
+    modos_validos = ["manual", "p-iris-auto", "p-iris-manual"]
+    if modo not in modos_validos:
+        raise ValueError(f"Modo inválido. Escolha entre: {', '.join(modos_validos)}")
+    # Define valor padrão para iris_level no modo p-iris-manual
+    if modo == "p-iris-manual" and iris_level is None:
+        iris_level = 40
+    # Monta o XML usando ET (ElementTree)
+    exposure = ET.Element('Exposure')
+    # Define ExposureType
+    exposure_type_elem = ET.SubElement(exposure, 'ExposureType')
+    # Adiciona os campos comuns a todos os modos
+    #overexpose = ET.SubElement(exposure, 'OverexposeSuppress')Se eu não enviar o parâmetro de exposição ainda dá certo
+    #ET.SubElement(overexpose, 'enabled').text = 'false'
+
+    # Configuração por modo
+    if modo == "manual":
+        exposure_type_elem.text = "manual"
+
+    elif modo == "p-iris-auto":
+        exposure_type_elem.text = "pIris-General"
+        piris_general = ET.SubElement(exposure, 'PIrisGeneral')
+        ET.SubElement(piris_general, 'pIrisType').text = "auto"
+
+    elif modo == "p-iris-manual":
+        exposure_type_elem.text = "pIris-General"
+        piris_general = ET.SubElement(exposure, 'PIrisGeneral')
+        ET.SubElement(piris_general, 'pIrisType').text = "MANUAL"
+        ET.SubElement(piris_general, 'irisLevel').text = str(iris_level)
+
+    # Converte o XML para string
+    payload = ET.tostring(exposure, encoding='unicode')
+
+    try:
+        response = requests.put(url, data=payload, headers=headers,
+            auth=HTTPDigestAuth(username, password), timeout=5)
+
+        if response.status_code == 200:
+            print(f"Exposição ajustada com sucesso para o modo '{modo}'.")
+            if modo == "p-iris-manual":
+                print(f"Iris Level ajustado para {iris_level}")
+        else:
+            print(f"Falha ao ajustar exposição. Código de status: {response.status_code}")
+            print(response.text)
+
+    except requests.exceptions.Timeout:
+        print(f"Erro: Tempo limite excedido ao tentar conectar à câmera {camera_ip}.")
+    except requests.exceptions.RequestException as e:
+        print(f"Erro de conexão: {e}")
+
+def get_color_config(camera_ip, username, password, https=False, cert_path="/etc/ssl/hikvision_with_san.pem"):
+    """
+    Faz uma requisição GET para obter as configurações de cor da câmera Hikvision.
+    
+    Parâmetros:
+        camera_ip (str): IP da câmera.
+        username (str): Usuário.
+        password (str): Senha.
+        https (bool): Se True, usa HTTPS com verificação SSL; caso contrário, usa HTTP.
+        cert_path (str): Caminho para o certificado SSL confiável (usado apenas se https=True).
+    
+    Retorna:
+        str: Resposta XML das configurações de cor, ou None em caso de falha.
+    """
+    protocol = "https" if https else "http"
+    url = f"{protocol}://{camera_ip}/ISAPI/Image/channels/1/color"
+    headers = {'Content-Type': 'application/xml'}
+
+    try:
+        response = requests.get(
+            url,
+            headers=headers,
+            auth=HTTPDigestAuth(username, password),
+            verify=cert_path if https else False,
+            timeout=5
+        )
+
+        if response.status_code == 200:
+            print("Configurações de cor obtidas com sucesso!")
+            print(response.text)
+            return response.text
+        else:
+            print(f"Falha ao obter configurações de cor. Código de status: {response.status_code}")
+            print(response.text)
+
+    except requests.exceptions.SSLError as ssl_err:
+        print(f"Erro de verificação SSL: {ssl_err}")
+    except requests.exceptions.Timeout:
+        print(f"Erro: Tempo limite excedido ao tentar conectar à câmera {camera_ip}.")
+    except requests.exceptions.RequestException as e:
+        print(f"Erro de conexão com a câmera {camera_ip}: {e}")
+
+camera_ip   = "" 
+username    = ""
+password    = ""
 
 #shutter_levels = get_shutter_time_levels_from_file(camera_ip, username, password)
 #if shutter_levels:
     #print("Lista de níveis de obturador disponíveis:", shutter_levels)
 
-#status = set_shutter(camera_ip, username, password, shutter_level="1/120")
-#status = set_ircut(camera_ip, username, password, ircut_filter_type="day");
-#status = set_gain_level(camera_ip, username, password, channel_id=1, gain_level=40)
-#status = get_parametros_imagem(camera_ip, username, password)
-#status = set_white_balance(camera_ip, username, password, channel_id=1, white_balance_style="daylightLamp") 
-#status = set_white_balance(camera_ip, username, password, channel_id=1, white_balance_style="manual", white_balance_red=60, white_balance_blue=70)
+#get_exposure_mode(camera_ip, username, password, channel_id=1, parameter_type="exposureMode")
+#get_shutter_options(camera_ip, username, password, channel_id=1)
+#set_shutter(camera_ip, username, password, shutter_level="1/120")
+#set_ircut(camera_ip, username, password, ircut_filter_type="day");
+#set_gain_level(camera_ip, username, password, channel_id=1, gain_level=40)
+#get_parametros_imagem(camera_ip, username, password)
+#set_white_balance(camera_ip, username, password, channel_id=1, white_balance_style="daylightLamp") 
+#set_white_balance(camera_ip, username, password, channel_id=1, white_balance_style="manual", white_balance_red=60, white_balance_blue=70)
+#get_device_status_capacities(camera_ip, username, password, "7a26_get_device_status_capacities")
+#get_parametros_imagem(camera_ip, username, password, "7a26_get_parametros_imagem")
+#get_system_capacities(camera_ip, username, password, "7a26_get_system_capacities") #é os isSuported
+#get_image_capabilities(camera_ip, username, password, "1027_get_image_capacities") 
+#set_distorcao_lente(camera_ip, username, password, enabled=False) #OK
+#set_eis(camera_ip, username, password, enabled=True)
+#set_exposure_by_modes(camera_ip, username, password, modo="manual") #modo manual
+#set_exposure_by_modes(camera_ip, username, pa#OKssword, modo="p-iris-auto") #p-iris-auto
+#set_exposure_by_modes(camera_ip, username, password, modo="p-iris-manual", iris_level=20) #p-iris-manual
+#get_image_capabilities(camera_ip, username, password, "1027_get_image_capacities") 
 
-if (status == "SUCCESS" or status == 0):
-    print("Parâmetro configurado com sucesso.")
-else:
-    print("Falha ao configurar parâmetro")
-
+get_color_config(camera_ip, username, password, https=False, cert_path="/etc/ssl/hikvision_with_san.pem")
 
