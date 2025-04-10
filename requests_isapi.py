@@ -4,9 +4,10 @@ from requests.auth import HTTPDigestAuth
 from xml.dom.minidom import parseString
 import xml.etree.ElementTree as ET
 import time
+import base64 
 
 """
-Sobre os parâmetros  em geral
+Sobre as requisições no geral
 - Se o valor fornecido for maior que o máximo permitido, será definido como o valor máximo.  
 - Se o valor fornecido for menor que o mínimo permitido, será definido como 0.  
 - Se um valor inválido for enviado (letras ou formato incorreto), a resposta retornará badreq.  
@@ -646,18 +647,17 @@ def set_exposure_by_modes(camera_ip, username, password, modo, iris_level=None):
     except requests.exceptions.RequestException as e:
         print(f"Erro de conexão: {e}")
 
-def get_color_config(camera_ip, username, password, https=False, cert_path="/etc/ssl/hikvision_with_san.pem"):
+def get_color_config(camera_ip, username, password, https=False, cert_path="/etc/ssl/mobit.crt"):
     """
     Faz uma requisição GET para obter as configurações de cor da câmera Hikvision.
-    
-    Parâmetros:
+    Args:
         camera_ip (str): IP da câmera.
         username (str): Usuário.
         password (str): Senha.
         https (bool): Se True, usa HTTPS com verificação SSL; caso contrário, usa HTTP.
         cert_path (str): Caminho para o certificado SSL confiável (usado apenas se https=True).
     
-    Retorna:
+    Return:
         str: Resposta XML das configurações de cor, ou None em caso de falha.
     """
     protocol = "https" if https else "http"
@@ -688,6 +688,371 @@ def get_color_config(camera_ip, username, password, https=False, cert_path="/etc
     except requests.exceptions.RequestException as e:
         print(f"Erro de conexão com a câmera {camera_ip}: {e}")
 
+##################### security function #########################
+
+def get_security_capabilities(camera_ip, username, password, https=True, cert_path=None):
+    """
+    Requisição GET para /ISAPI/Security/capabilities de câmeras Hikvision. Printa os "isSupportX"
+    Args:
+        https (bool): Se True, usa HTTPS. Se False, usa HTTP.
+        cert_path (str, optional): Caminho para o certificado (apenas se HTTPS for usado).
+    Returns:
+        dict | str: Resposta em JSON (se possível)
+    """
+    protocol = "https" if https else "http"
+    url = f"{protocol}://{camera_ip}/ISAPI/Security/capabilities"
+
+    try:
+        if https and cert_path:
+            response = requests.get(
+                url,
+                auth=HTTPDigestAuth(username, password),
+                verify=cert_path,
+                timeout=5
+            )
+        else:
+            response = requests.get(
+                url,
+                auth=HTTPDigestAuth(username, password),
+                verify=https,
+                timeout=5
+            )
+        
+        response.raise_for_status()
+
+        try:
+            return response.json()
+        except ValueError:
+            return response.text
+
+    except requests.exceptions.RequestException as e:
+        print(f"Erro ao acessar {url}: {e}")
+        return None
+
+def get_certificate_select_capabilities(camera_ip, username, password, https=True, cert_path=None):
+    """
+    Requisição GET para /ISAPI/Security/certificate/select/capabilities?format=json
+
+    Args:
+        camera_ip (str): IP da câmera.
+        username (str): Nome de usuário.
+        password (str): Senha.
+        https (bool): Se True, usa HTTPS. Se False, usa HTTP.
+        cert_path (str, optional): Caminho do certificado (usado se HTTPS for True).
+    Returns:
+        dict | str: Resposta JSON (se possível)
+    """
+    protocol = "https" if https else "http"
+    url = f"{protocol}://{camera_ip}/ISAPI/Security/certificate/select/capabilities?format=json"
+
+    try:
+        if https and cert_path:
+            response = requests.get(
+                url,
+                auth=HTTPDigestAuth(username, password),
+                verify=cert_path,
+                timeout=5
+            )
+        else:
+            response = requests.get(
+                url,
+                auth=HTTPDigestAuth(username, password),
+                verify=https,
+                timeout=5
+            )
+
+        response.raise_for_status()
+
+        try:
+            return response.json()
+        except ValueError:
+            return response.text
+
+    except requests.exceptions.RequestException as e:
+        print(f"Erro ao acessar {url}: {e}")
+        return None
+
+def get_device_certificate_capabilities(camera_ip, username, password, https=True, cert_path=None):
+    """
+    Requisição GET para /ISAPI/Security/deviceCertificate/capabilities?format=json
+    para obter as capacidades que o sistema oferece (ver o opt basicamente)
+    Args:
+        https: Se True, usa HTTPS. Se False, usa HTTP.
+        cert_path: Caminho do certificado (usado se HTTPS for True).
+    Returns:
+        dict | str: Resposta JSON (se possível) ou texto puro.
+    Exemple:
+        {'CertificateRevocationCap': {'customID': {'@min': 1, '@max': 64}, 'status': {'@opt': ['normal', 'expired', 'exceptional']}}},)
+    """
+    protocol = "https" if https else "http"
+    url = f"{protocol}://{camera_ip}/ISAPI/Security/deviceCertificate/capabilities?format=json"
+
+    try:
+        if https and cert_path:
+            response = requests.get(
+                url,
+                auth=HTTPDigestAuth(username, password),
+                verify=cert_path,
+                timeout=5
+            )
+        else:
+            response = requests.get(
+                url,
+                auth=HTTPDigestAuth(username, password),
+                verify=https,
+                timeout=5
+            )
+
+        response.raise_for_status()
+
+        try:
+            return response.json()
+        except ValueError:
+            return response.text
+
+    except requests.exceptions.RequestException as e:
+        print(f"Erro ao acessar {url}: {e}")
+        return None
+
+def get_certificate_revocation_config(camera_ip, username, password, https=True, cert_path=None):
+    """
+    Requisição GET para /ISAPI/Security/certificate/certificateRevocation?format=json
+    para obter configurações de revogação (expiração) de certificado.
+    Args:
+        https: Se True, usa HTTPS. Se False, usa HTTP.
+        cert_path: Caminho do certificado confiável (usado se HTTPS for True).
+    Returns:
+        dict | str: Resposta JSON (se possível) ou texto puro.
+    """
+    protocol = "https" if https else "http"
+    url = f"{protocol}://{camera_ip}/ISAPI/Security/deviceCertificate/certificateRevocation?format=json"
+
+    try:
+        if https and cert_path:
+            response = requests.get(
+                url,
+                auth=HTTPDigestAuth(username, password),
+                verify=cert_path,
+                timeout=10
+            )
+        else:
+            response = requests.get(
+                url,
+                auth=HTTPDigestAuth(username, password),
+                verify=https,
+                timeout=10
+            )
+
+        response.raise_for_status()
+
+        try:
+            return response.json()
+        except ValueError:
+            return response.text
+
+    except requests.exceptions.RequestException as e:
+        print(f"Erro ao acessar {url}: {e}")
+        return None
+
+def get_server_certificates(camera_ip, username, password, https=False, cert_path=None):
+    """
+    Requisição GET para /ISAPI/Security/serverCertificate/certificates?format=json
+    O melhor para obter parâmetros de todos os certificados instalados. Equivalente as propriedades de certificado na interface.
+    Args:
+        https: Se True, usa HTTPS. Se False, usa HTTP.
+        cert_path: Caminho do certificado confiável (usado se HTTPS for True).
+    Returns:
+        dict | str: Resposta JSON ou texto.
+    Exemple:
+        'CertificateInfo': [
+        {
+          'issuerDN': 'GeoTrustTLSRSACAG1',
+          'subjectDN': '*.mobit.com.br',
+          'startDate': '2024-11-0108: 00: 00',
+          'endDate': '2025-11-0507: 59: 59',
+          'type': 'HTTPS',
+          'status': 'normal',
+          'customID': 'mobitt1'
+        }
+    """
+    protocol = "https" if https else "http"
+    url = f"{protocol}://{camera_ip}/ISAPI/Security/serverCertificate/certificates?format=json"
+
+    try:
+        if https and cert_path:
+            response = requests.get(
+                url,
+                auth=HTTPDigestAuth(username, password),
+                verify=cert_path,
+                timeout=10
+            )
+        else:
+            response = requests.get(
+                url,
+                auth=HTTPDigestAuth(username, password),
+                verify=https,
+                timeout=10
+            )
+
+        response.raise_for_status()
+
+        try:
+            return response.json()
+        except ValueError:
+            return response.text
+
+    except requests.exceptions.RequestException as e:
+        print(f"Erro ao acessar {url}: {e}")
+        return None
+
+def delete_server_certificate(camera_ip, username, password, custom_id, https=False, cert_path=None):
+    """
+    Deleta um certificado do servidor usando o customID via ISAPI.
+
+    Args:
+        camera_ip (str): IP da câmera.
+        username (str): Nome de usuário.
+        password (str): Senha.
+        custom_id (str): Identificador do certificado (ex: "mobitt1").
+        https (bool): Se True, usa HTTPS.
+        cert_path (str, optional): Caminho para o certificado confiável (opcional se HTTPS).
+
+    Returns:
+        bool: True se a exclusão foi bem-sucedida, False caso contrário.
+    """
+    protocol = "https" if https else "http"
+    url = f"{protocol}://{camera_ip}/ISAPI/Security/serverCertificate/certificates/{custom_id}?format=json"
+
+    try:
+        if https and cert_path:
+            response = requests.delete(
+                url,
+                auth=HTTPDigestAuth(username, password),
+                verify=cert_path,
+                timeout=10
+            )
+        else:
+            response = requests.delete(
+                url,
+                auth=HTTPDigestAuth(username, password),
+                verify=https,
+                timeout=10
+            )
+
+        print(f"Status code: {response.status_code}")
+        return response.status_code == 200
+
+    except requests.exceptions.RequestException as e:
+        print(f"Erro ao deletar certificado: {e}")
+        return False
+
+def upload_server_certificate_with_iv(camera_ip, username, password, cert_file_path, custom_id, iv, https=False, cert_path=None):
+    """
+    Faz upload de certificado .pfx com chave privada para a câmera Hikvision via ISAPI,
+    usando o IV capturado manualmente da interface da câmera.
+    Args:
+        camera_ip (str): IP da câmera.
+        username (str): Usuário da câmera.
+        password (str): Senha da câmera.
+        cert_file_path (str): Caminho para o arquivo .pfx (PKCS#12).
+        custom_id (str): Nome identificador do certificado.
+        iv (str): Valor do IV capturado da interface (32 caracteres hex).
+        https (bool): Se True, usa HTTPS.
+        cert_path (str, optional): Caminho para o certificado confiável (em modo HTTPS).
+    Returns:
+        bool: True se o upload foi bem-sucedido, False caso contrário.
+    """
+    protocol = "https" if https else "http"
+    url = (
+        f"{protocol}://{camera_ip}/ISAPI/Security/serverCertificate/certificate"
+        f"?customID={custom_id}"
+    )
+
+    headers = {
+        "Content-Type": "application/octet-stream"
+    }
+
+    try:
+        with open(cert_file_path, 'rb') as file:
+            cert_data = file.read()
+
+        response = requests.post(
+            url,
+            data=cert_data,
+            headers=headers,
+            auth=HTTPDigestAuth(username, password),
+            verify=cert_path if https and cert_path else https,
+            timeout=15
+        )
+
+        print(f"Status code: {response.status_code}")
+        print(f"Resposta: {response.text}")
+        return response.status_code == 200
+
+    except Exception as e:
+        print(f"Erro ao enviar certificado: {e}")
+        return False
+
+def upload_pfx_certificate_pkcs12(camera_ip, username, password, cert_file_path, custom_id, pfx_password, https=False, cert_path=None):
+    """
+    Envia um certificado em formato .pfx (PKCS#12) com XML e conteúdo binário no mesmo corpo.
+
+    Args:
+        cert_file_path: Caminho do .pfx contendo certificado e chave.
+        custom_id: Identificador do certificado na câmera.
+        pfx_password: Senha usada ao gerar o .pfx.
+        https: Se True, usa HTTPS.
+        cert_path: Caminho para CA confiável (se https for True).
+
+    Returns:
+        True se sucesso, False caso contrário.
+    """
+    protocol = "https" if https else "http"
+    url = f"{protocol}://{camera_ip}/ISAPI/Security/serverCertificate/certificate?customID={custom_id}"
+
+    # Codifica a senha do .pfx em base64
+    encoded_password = base64.b64encode(pfx_password.encode('utf-8')).decode('utf-8')
+
+    print(f"\nencoded_password: {encoded_password}\n")
+
+    # Monta o cabeçalho XML que deve vir antes do conteúdo binário
+    xml_header = f"""<?xml version="1.0" encoding="UTF-8"?>
+    <CertificateReq version="1.0" xmlns="http://www.isapi.org/ver20/XMLSchema">
+        <certificateMode>signingRequest</certificateMode>
+        <privateKeyMode>seperateKey</privateKeyMode>
+        <seperateKeyPassword></seperateKeyPassword>
+        <PKCSPassword></PKCSPassword>
+        <dataType>certificate</dataType>
+    </CertificateReq>"""
+
+    try:
+        with open(cert_file_path, 'rb') as file:
+            cert_bin = file.read()
+
+        # Junta XML + binário como corpo único
+        full_payload = xml_header.encode('utf-8') + cert_bin
+
+        headers = {
+            "Content-Type": "application/xml"
+        }
+
+        response = requests.post(
+            url,
+            data=full_payload,
+            headers=headers,
+            auth=HTTPDigestAuth(username, password),
+            verify=cert_path if https and cert_path else https,
+            timeout=20
+        )
+
+        print(f"Status code: {response.status_code}")
+        print(f"Resposta: {response.text}")
+        return response.status_code == 200
+
+    except Exception as e:
+        print(f"Erro ao enviar certificado: {e}")
+        return False
+
 camera_ip   = "" 
 username    = ""
 password    = ""
@@ -714,6 +1079,26 @@ password    = ""
 #set_exposure_by_modes(camera_ip, username, pa#OKssword, modo="p-iris-auto") #p-iris-auto
 #set_exposure_by_modes(camera_ip, username, password, modo="p-iris-manual", iris_level=20) #p-iris-manual
 #get_image_capabilities(camera_ip, username, password, "1027_get_image_capacities") 
+#status = get_color_config(camera_ip, username, password, https=True, cert_path="/etc/ssl/hikvision_with_san.pem") #OK teste com certificado
 
-get_color_config(camera_ip, username, password, https=False, cert_path="/etc/ssl/hikvision_with_san.pem")
+########## NEW SECURITY FUNCTIONS OK #################
+
+#get_security_capabilities(camera_ip, username, password, https=False)              #OK
+#get_certificate_select_capabilities(camera_ip, username, password, https=False)    #OK ruim sem muita informacao
+#get_server_certificates(camera_ip, username, password, https=False)                #OK As infors do propriedades do certificado
+#delete_server_certificate(camera_ip, username, password, custom_id="cul", https=False) #OK apaga com o CustomID que dá pra ver pelo get_server_certificates
+#get_device_certificate_capabilities(camera_ip, username, password, https=False, cert_path=None) #OK Pega só os campos que existem como status id os opt
+########## THIS DONT WORK (yet) ###############
+
+status = upload_pfx_certificate_pkcs12(
+    camera_ip,
+    username,
+    password,
+    cert_file_path="",
+    custom_id="",
+    pfx_password="",  # senha usada na geração do .pfx
+    https=True,
+    cert_path=""
+)
+print (status)
 
